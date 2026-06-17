@@ -81,9 +81,13 @@ def search_listings(
         if max_price is not None and listing["price"] > max_price:
             continue
 
-        # Filter by size — case-insensitive substring match (e.g. "M" in "S/M").
-        if size is not None and size.lower() not in listing["size"].lower():
-            continue
+        # Filter by size — match against the listing size's tokens, not a raw
+        # substring. This keeps "M" matching "S/M" while preventing "8" from
+        # matching unrelated sizes like "W28".
+        if size is not None:
+            size_tokens = set(re.findall(r"[a-z0-9]+", listing["size"].lower()))
+            if str(size).lower() not in size_tokens:
+                continue
 
         # Build the searchable text from the listing's text-bearing fields.
         searchable = " ".join(

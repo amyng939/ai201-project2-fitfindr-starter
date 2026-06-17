@@ -59,7 +59,7 @@ If the wardrobe is empty, the string is populated with general styling advice fo
 
 **What it does:**
 <!-- Describe what this tool does in 1–2 sentences -->
-Generates a caption of the outfit for social media.
+Generates a caption of the outfit given from suggest_outfit for social media.
 
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
@@ -86,26 +86,28 @@ If outfit is empty or missing, return a descriptive error message string — do 
 
 **How does your agent decide which tool to call next?**
 <!-- Describe the logic your planning loop uses. What does it look at? What conditions change its behavior? How does it know when it's done? -->
-Initialize the session with _new_session()
+The loop runs a sequence of steps, reading from and writing to the session dict at each step (see State Management below). The session is what each step looks at to decide whether it can continue: if a step can't produce usable output, it sets `session["error"]` and returns early, and the loop is done. Otherwise it runs to completion and returns the session. This means the agent does not call all tools in a fixed sequence regardless of context — it responds to what it receives.
 
-Parse the user's query to extract a description, size, and max_price using the LLM to parse it. Store the result in session["parsed"].
+1. **Initialize the session.** Call `_new_session(query, wardrobe)` to create the session dict that every later step reads from and writes to.
 
-Call search_listings() with the parsed parameters. Store results in session["search_results"]. If no results: set session["error"] to a helpful message and return the session early. Do NOT proceed to suggest_outfit with empty input.
+2. **Parse the query.** Ask the LLM to extract `description`, `size`, and `max_price` from the free-text query, then store the result in `session["parsed"]`.
 
-Select the item to use (e.g., the top result). Store it in session["selected_item"].
+3. **Search listings.** Call `search_listings()` with the parsed `description`, `size`, and `max_price`. Store the results in `session["search_results"]`. If no results: set `session["error"]` to a helpful message and return the session early. Do NOT proceed to `suggest_outfit` with empty input.
 
-Call suggest_outfit() with the selected item and wardrobe. Store the result in session ["outfit_suggestion"].
+4. **Select the item.** Take the top (most relevant) result and store it in `session["selected_item"]`.
 
-Call create_fit_card() with the outfit suggestion and selected item. Store the result in session["fit_card"].
+5. **Suggest an outfit.** Call `suggest_outfit()` with the selected item and the wardrobe. Store the result in `session["outfit_suggestion"]`.
 
-Return the session.
+6. **Create the fit card.** Call `create_fit_card()` with the outfit suggestion and the selected item. Store the result in `session["fit_card"]`.
+
+7. **Return the session.**
 ---
 
 ## State Management
 
 **How does information from one tool get passed to the next?**
 <!-- Describe how your agent stores and accesses state within a session. What data is tracked? How is it passed between tool calls? -->
-There is a session dict created by _new_session at the start of each run that is read from in each step of the planning loop and written to so that the next tools can access previous data. It stores the original query string, parsed description, size, and max price from the query, search_results of the matching listing dicts, selected_item for top result, wardrobe for the user's wardrobe dict, the outfit_suggestion string, fit_card string, and error in case interaction ended early. At the start of a new session, the session dict only has the query and wardrobe and everything else is set to none or empty. error is set by the agent if a step can't continue such as if search_results is empty and error is read first by caller to ensure a step can be done. The session will then be returned.
+There is a session dict created by _new_session at the start of each run that is read from in each step of the planning loop and written to by the agent so that the next tools can access previous data. It stores the original query string, parsed description, size, and max price from the query, search_results of the matching listing dicts, selected_item for top result, wardrobe for the user's wardrobe dict, the outfit_suggestion string, fit_card string, and error in case interaction ended early. At the start of a new session, the session dict only has the query and wardrobe and everything else is set to none or empty. error is set by the agent if a step can't continue such as if search_results is empty and error is read first by caller to ensure a step can be done. The session will then be returned at the end of the run.
 
 ---
 
