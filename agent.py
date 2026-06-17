@@ -18,7 +18,62 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
-from tools import search_listings, suggest_outfit, create_fit_card
+import json
+
+from tools import search_listings, suggest_outfit, create_fit_card, _get_groq_client
+
+
+# ── query parsing ─────────────────────────────────────────────────────────────
+
+def _parse_query(query: str) -> dict:
+    """
+    Use the LLM to extract structured search parameters from a free-text query.
+
+    Returns a dict with keys:
+        description (str):       keywords for the search (always present)
+        size (str | None):      size filter, or None if not mentioned
+        max_price (float | None): price ceiling, or None if not mentioned
+
+    Falls back to using the raw query as the description if the LLM response
+    can't be parsed — this never raises.
+    """
+    client = _get_groq_client()
+
+    prompt = (
+        "Extract search parameters from this thrift-shopping request and return "
+        "ONLY a JSON object with these keys:\n"
+        '  "description": a short keyword phrase of what they want (string)\n'
+        '  "size": the clothing size if mentioned, else null\n'
+        '  "max_price": the maximum price as a number if mentioned, else null\n\n'
+        f"Request: {query}"
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You extract structured data as JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        parsed = json.loads(response.choices[0].message.content)
+    except Exception:
+        # If parsing fails for any reason, fall back to a keyword-only search.
+        return {"description": query, "size": None, "max_price": None}
+
+    # Normalize: guarantee the keys exist and coerce max_price to float.
+    description = parsed.get("description") or query
+    size = parsed.get("size") or None
+    max_price = parsed.get("max_price")
+    if max_price is not None:
+        try:
+            max_price = float(max_price)
+        except (TypeError, ValueError):
+            max_price = None
+
+    return {"description": description, "size": size, "max_price": max_price}
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -92,9 +147,40 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # Step 1: Initialize the session.
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: Parse the query into description / size / max_price.
+    session["parsed"] = _parse_query(query)
+
+    # Step 3: Search listings with the parsed parameters.
+    session["search_results"] = search_listings(
+        description=session["parsed"]["description"],
+        size=session["parsed"]["size"],
+        max_price=session["parsed"]["max_price"],
+    )
+    if not session["search_results"]:
+        # No matches → end early, don't call the downstream tools.
+        session["error"] = (
+            f"No listings found for '{query}'. Try different keywords, a larger "
+            "budget, or removing the size filter."
+        )
+        return session
+
+    # Step 4: Select the top (most relevant) result.
+    session["selected_item"] = session["search_results"][0]
+
+    # Step 5: Suggest an outfit pairing the item with the wardrobe.
+    session["outfit_suggestion"] = suggest_outfit(
+        session["selected_item"], session["wardrobe"]
+    )
+
+    # Step 6: Generate a shareable fit card from the outfit.
+    session["fit_card"] = create_fit_card(
+        session["outfit_suggestion"], session["selected_item"]
+    )
+
+    # Step 7: Return the completed session.
     return session
 
 

@@ -232,8 +232,8 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
     # Guard: empty / whitespace-only / non-string outfit → error message, no crash.
     if not isinstance(outfit, str) or not outfit.strip():
         return (
-            "Can't create a fit card without an outfit suggestion. "
-            "Run suggest_outfit() first and pass its result here."
+            "We couldn't put together a caption for this look right now. "
+            "Try a different item or search again."
         )
 
     client = _get_groq_client()
